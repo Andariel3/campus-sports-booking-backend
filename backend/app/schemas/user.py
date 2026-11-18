@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, EmailStr, Field, PlainSerializer, field_validator
 
@@ -17,6 +17,8 @@ API_ROLES = {
     UserRole.ADMINISTRATOR: "administrator",
 }
 ROLES_FROM_API = {value: role for role, value in API_ROLES.items()}
+
+ApiRoleName = Literal["student", "profesor", "administrator"]
 
 ApiRole = Annotated[UserRole, PlainSerializer(lambda role: API_ROLES[role], return_type=str)]
 
