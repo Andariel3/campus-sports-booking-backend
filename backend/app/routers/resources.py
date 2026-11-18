@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
+from app.core.deps import AdminUser
 from app.db.session import get_db
 from app.models.resource import ResourceType
 from app.schemas.resource import ResourceCreate, ResourceRead, ResourceUpdate
@@ -31,7 +32,7 @@ def list_resources(
     status_code=status.HTTP_201_CREATED,
     summary="Adaugare resursa (admin)",
 )
-def create_resource(data: ResourceCreate, db: DbSession):
+def create_resource(data: ResourceCreate, _: AdminUser, db: DbSession):
     try:
         return resource_service.create_resource(db, data)
     except DuplicateResourceNameError:
@@ -47,7 +48,7 @@ def get_resource(resource_id: ResourceId, db: DbSession):
 
 
 @router.patch("/{resourceId}", response_model=ResourceRead, summary="Modificare resursa (admin)")
-def update_resource(resource_id: ResourceId, data: ResourceUpdate, db: DbSession):
+def update_resource(resource_id: ResourceId, data: ResourceUpdate, _: AdminUser, db: DbSession):
     try:
         return resource_service.update_resource(db, resource_id, data)
     except ResourceNotFoundError:
@@ -64,7 +65,7 @@ def update_resource(resource_id: ResourceId, data: ResourceUpdate, db: DbSession
     summary="Stergere resursa (admin)",
     description="Resursa devine inactiva si nu mai apare in lista; istoricul rezervarilor ramane.",
 )
-def delete_resource(resource_id: ResourceId, db: DbSession) -> None:
+def delete_resource(resource_id: ResourceId, _: AdminUser, db: DbSession) -> None:
     try:
         resource_service.deactivate_resource(db, resource_id)
     except ResourceNotFoundError:

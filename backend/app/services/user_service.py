@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.clock import as_utc, month_bounds, now
 from app.models.reservation import Reservation, ReservationStatus
-from app.models.user import User
+from app.models.user import User, UserRole
 
 
 def is_blocked(user: User) -> bool:
@@ -34,6 +34,52 @@ def reservations_this_month(db: Session, user_id: int) -> int:
             Reservation.start_time < end,
         )
     )
+
+
+NO_SHOWS_BEFORE_BLOCK = 2
+
+
+class UserNotFoundError(Exception):
+    pass
+
+
+def get_user(db: Session, user_id: int) -> User:
+    user = db.get(User, user_id)
+    if user is None:
+        raise UserNotFoundError(user_id)
+    return user
+
+
+def list_users(
+    db: Session, role: UserRole | None = None, blocked: bool | None = None
+) -> list[User]:
+    query = select(User).order_by(User.last_name, User.first_name)
+    if role is not None:
+        query = query.where(User.role == role)
+    if blocked is True:
+        query = query.where(User.blocked_until > now())
+    elif blocked is False:
+        query = query.where((User.blocked_until.is_(None)) | (User.blocked_until <= now()))
+    return list(db.scalars(query))
+
+
+def unblock(db: Session, user_id: int) -> User:
+    user = get_user(db, user_id)
+    user.blocked_until = None
+    db.commit()
+    return user
+
+
+def block_after_no_shows(db: Session, user: User) -> None:
+    """Dupa a doua neprezentare din luna contul se blocheaza pana la sfarsitul lunii (PRD).
+
+    Se apeleaza dupa ce o rezervare a fost marcata ca neprezentare. Adminii nu se blocheaza.
+    """
+    if user.role == UserRole.ADMINISTRATOR:
+        return
+    if no_show_count(db, user.id) >= NO_SHOWS_BEFORE_BLOCK:
+        _, next_month = month_bounds(now())
+        user.blocked_until = next_month
 
 
 def user_view(db: Session, user: User) -> dict:
