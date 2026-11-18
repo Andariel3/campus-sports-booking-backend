@@ -16,6 +16,7 @@ from app.models import (
     ReservationStatus,
     Resource,
     ResourceType,
+    SportType,
     User,
     UserRole,
 )
@@ -39,7 +40,7 @@ def add_user_and_resource(db: Session) -> tuple[User, Resource]:
         last_name="Popescu",
         password_hash="x",
     )
-    resource = Resource(name="Teren tenis 1", type=ResourceType.TEREN, sport="tenis")
+    resource = Resource(name="Teren tenis 1", sport_type=SportType(label="tenis"))
     db.add_all([user, resource])
     db.commit()
     return user, resource
@@ -104,3 +105,13 @@ def test_overlap_constraint_only_on_postgres() -> None:
     assert "EXCLUDE USING gist" in postgres_ddl
     assert "status != 'Cancelled'" in postgres_ddl
     assert "EXCLUDE" not in sqlite_ddl
+
+
+def test_resource_type_comes_from_sport(db: Session) -> None:
+    pool = Resource(name="Bazin USV", sport_type=SportType(label="inot"))
+    court = Resource(name="Teren fotbal", sport_type=SportType(label="fotbal"))
+    db.add_all([pool, court])
+    db.commit()
+
+    assert pool.type == ResourceType.BAZIN
+    assert court.type == ResourceType.TEREN
