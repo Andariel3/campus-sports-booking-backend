@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
@@ -6,8 +7,9 @@ from sqlalchemy.orm import Session
 from app.core.deps import AdminUser
 from app.db.session import get_db
 from app.models.resource import ResourceType
+from app.schemas.availability import Availability
 from app.schemas.resource import ResourceCreate, ResourceRead, ResourceUpdate
-from app.services import resource_service
+from app.services import availability_service, resource_service
 from app.services.resource_service import DuplicateResourceNameError, ResourceNotFoundError
 
 router = APIRouter(prefix="/resources", tags=["resources"])
@@ -45,6 +47,26 @@ def get_resource(resource_id: ResourceId, db: DbSession):
         return resource_service.get_resource(db, resource_id)
     except ResourceNotFoundError:
         raise _not_found(resource_id) from None
+
+
+@router.get(
+    "/{resourceId}/availability",
+    response_model=Availability,
+    summary="Orarul unei resurse pe o zi",
+    description="Intervale de cate o ora din programul zilei: liber / ocupat / mentenanta.",
+)
+def get_availability(
+    resource_id: ResourceId, db: DbSession, day: Annotated[date, Query(alias="date")]
+):
+    try:
+        resource = resource_service.get_resource(db, resource_id)
+    except ResourceNotFoundError:
+        raise _not_found(resource_id) from None
+    return {
+        "resource_id": resource.id,
+        "date": day,
+        "slots": availability_service.day_slots(db, resource, day),
+    }
 
 
 @router.patch("/{resourceId}", response_model=ResourceRead, summary="Modificare resursa (admin)")
