@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
 from app.core.errors import register_error_handlers
-from app.routers import auth, resources, users
+from app.routers import auth, reservations, resources, users
 
 settings = get_settings()
 
@@ -22,6 +22,7 @@ api = APIRouter(prefix="/api/v1")
 api.include_router(auth.router)
 api.include_router(users.router)
 api.include_router(resources.router)
+api.include_router(reservations.router)
 
 
 @api.get("/health", tags=["health"])
