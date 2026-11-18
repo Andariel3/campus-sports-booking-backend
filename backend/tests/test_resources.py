@@ -1,4 +1,8 @@
+from datetime import time
+
 from fastapi.testclient import TestClient
+
+from app.models.resource import Resource, SportType
 
 URL = "/api/v1/resources"
 
@@ -34,15 +38,38 @@ def test_create_returns_contract_fields_in_camel_case(client: TestClient) -> Non
         "pricePerHour",
         "openHour",
         "closeHour",
+        "isActive",
     }
     assert created["pricePerHour"] == 40
     assert created["openHour"] == "08:00"
 
 
-def test_only_name_type_and_sport_are_required(client: TestClient) -> None:
-    response = client.post(URL, json={"name": "Bazin USV", "type": "bazin", "sport": "inot"})
+def test_only_name_and_sport_are_required(client: TestClient) -> None:
+    response = client.post(URL, json={"name": "Bazin USV", "sport": "inot"})
     assert response.status_code == 201
-    assert response.json()["pricePerHour"] is None
+    body = response.json()
+    # tipul se deduce din sport, programul implicit e 08:00 - 22:00
+    assert body["type"] == "bazin"
+    assert body["pricePerHour"] == 0
+    assert (body["openHour"], body["closeHour"]) == ("08:00", "22:00")
+    assert body["isActive"] is True
+
+
+def test_type_must_match_sport(client: TestClient) -> None:
+    response = client.post(URL, json={**TENNIS_COURT, "type": "bazin"})
+    assert response.status_code == 422
+    assert "type" in response.json()["detail"]
+
+
+def test_saved_like_the_database_schema(client: TestClient, db) -> None:
+    created = create(client)
+    create(client, name="Teren tenis 2", sport="Tenis")
+
+    # sportul e o singura data in sport_types, programul e pe fiecare zi in resource_schedules
+    assert db.query(SportType).count() == 1
+    resource = db.get(Resource, created["id"])
+    assert [s.day_of_week for s in resource.schedules] == list(range(7))
+    assert {(s.open_time, s.close_time) for s in resource.schedules} == {(time(8, 0), time(22, 0))}
 
 
 def test_get_by_id(client: TestClient) -> None:
@@ -79,10 +106,21 @@ def test_patch_checks_hours_against_saved_ones(client: TestClient) -> None:
     assert response.json() == {"detail": "openHour must be before closeHour"}
 
 
-def test_delete(client: TestClient) -> None:
+def test_patch_hours_updates_every_day(client: TestClient, db) -> None:
+    created = create(client)
+    response = client.patch(f"{URL}/{created['id']}", json={"closeHour": "20:00"})
+    assert response.json()["closeHour"] == "20:00"
+    resource = db.get(Resource, created["id"])
+    assert {s.close_time for s in resource.schedules} == {time(20, 0)}
+
+
+def test_delete_deactivates_and_hides_from_list(client: TestClient) -> None:
     created = create(client)
     assert client.delete(f"{URL}/{created['id']}").status_code == 204
-    assert client.get(f"{URL}/{created['id']}").status_code == 404
+
+    assert client.get(URL).json() == []
+    # rezervarile vechi trimit inca la resursa, asa ca detaliile raman
+    assert client.get(f"{URL}/{created['id']}").json()["isActive"] is False
 
 
 def test_missing_resource_returns_404_with_detail(client: TestClient) -> None:
