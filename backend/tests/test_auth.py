@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
+from app.models.user import User
 
 REGISTER = "/api/v1/auth/register"
 LOGIN = "/api/v1/auth/login"
@@ -23,9 +24,9 @@ def register(client: TestClient, **overrides):
 
 
 def login_token(client: TestClient, email: str, password: str) -> str:
-    response = client.post(LOGIN, json={"email": email, "password": password})
+    response = client.post(LOGIN, data={"username": email, "password": password})
     assert response.status_code == 200, response.text
-    return response.json()["accessToken"]
+    return response.json()["access_token"]
 
 
 def auth(token: str) -> dict[str, str]:
@@ -38,14 +39,16 @@ def test_register_student(client: TestClient) -> None:
     assert response.status_code == 201, response.text
     body = response.json()
     assert body["email"] == "ion.popescu@student.usv.ro"
-    assert body["role"] == "Student"
-    assert body["blockedUntil"] is None
+    assert body["role"] == "student"
+    assert body["blocked"] is False
+    assert body["noShowCount"] == 0
+    assert body["reservationsThisMonth"] == 0
     assert "password" not in body and "passwordHash" not in body
 
 
 def test_usm_email_gets_professor_role(client: TestClient) -> None:
     response = register(client, email="maria.ionescu@usm.ro")
-    assert response.json()["role"] == "Professor"
+    assert response.json()["role"] == "profesor"
 
 
 def test_email_is_saved_lowercase(client: TestClient) -> None:
@@ -55,10 +58,16 @@ def test_email_is_saved_lowercase(client: TestClient) -> None:
 
 @pytest.mark.parametrize(
     "email",
-    ["ion@gmail.com", "ion@usv.ro", "ion@student.usv.ro.evil.com", "nu-e-email"],
+    ["ion@gmail.com", "ion@usv.ro", "ion@student.usv.ro.evil.com"],
 )
-def test_register_rejects_non_usv_emails(client: TestClient, email: str) -> None:
+def test_register_rejects_non_usv_emails_with_400(client: TestClient, email: str) -> None:
     response = register(client, email=email)
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Se accepta doar adrese @student.usv.ro sau @usm.ro"}
+
+
+def test_register_rejects_invalid_email_with_422(client: TestClient) -> None:
+    response = register(client, email="nu-e-email")
     assert response.status_code == 422
     assert isinstance(response.json()["detail"], str)
 
@@ -77,23 +86,51 @@ def test_register_same_email_twice_returns_409(client: TestClient) -> None:
 
 def test_login_returns_bearer_token(client: TestClient) -> None:
     register(client)
-    response = client.post(LOGIN, json={"email": STUDENT["email"], "password": STUDENT["password"]})
+    response = client.post(
+        LOGIN, data={"username": STUDENT["email"], "password": STUDENT["password"]}
+    )
 
     assert response.status_code == 200
-    assert response.json()["tokenType"] == "bearer"
-    assert response.json()["accessToken"]
+    assert response.json()["token_type"] == "bearer"
+    assert response.json()["access_token"]
+
+
+def test_login_email_is_case_insensitive(client: TestClient) -> None:
+    register(client)
+    login_token(client, "ION.Popescu@student.usv.ro", STUDENT["password"])
+
+
+def test_login_blocked_account_returns_403(client: TestClient, db) -> None:
+    register(client)
+    user = db.query(User).one()
+    user.blocked_until = datetime.now(UTC) + timedelta(days=3)
+    db.commit()
+
+    response = client.post(
+        LOGIN, data={"username": STUDENT["email"], "password": STUDENT["password"]}
+    )
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Contul este blocat din cauza neprezentarilor"}
+
+
+def test_login_with_json_body_is_rejected(client: TestClient) -> None:
+    register(client)
+    response = client.post(LOGIN, json={"username": STUDENT["email"], "password": "x"})
+    assert response.status_code == 422
 
 
 def test_login_wrong_password_returns_401(client: TestClient) -> None:
     register(client)
-    response = client.post(LOGIN, json={"email": STUDENT["email"], "password": "gresita-123"})
+    response = client.post(LOGIN, data={"username": STUDENT["email"], "password": "gresita-123"})
 
     assert response.status_code == 401
     assert response.json() == {"detail": "Email sau parola gresita"}
 
 
 def test_login_unknown_email_returns_same_401(client: TestClient) -> None:
-    response = client.post(LOGIN, json={"email": "nimeni@student.usv.ro", "password": "orice-123"})
+    response = client.post(
+        LOGIN, data={"username": "nimeni@student.usv.ro", "password": "orice-123"}
+    )
 
     assert response.status_code == 401
     assert response.json() == {"detail": "Email sau parola gresita"}

@@ -1,12 +1,28 @@
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, PlainSerializer, field_validator
 
 from app.models.user import UserRole
 from app.schemas.resource import CamelModel
 
 # doar adresele institutionale au voie sa-si faca cont
 ALLOWED_DOMAINS = ("student.usv.ro", "usm.ro")
+
+# in baza de date rolurile sunt Student / Professor / Administrator,
+# in API (Swagger) sunt student / profesor / administrator
+API_ROLES = {
+    UserRole.STUDENT: "student",
+    UserRole.PROFESSOR: "profesor",
+    UserRole.ADMINISTRATOR: "administrator",
+}
+ROLES_FROM_API = {value: role for role, value in API_ROLES.items()}
+
+ApiRole = Annotated[UserRole, PlainSerializer(lambda role: API_ROLES[role], return_type=str)]
+
+
+def is_usv_email(email: str) -> bool:
+    return email.rsplit("@", 1)[-1].lower() in ALLOWED_DOMAINS
 
 
 class UserRegister(CamelModel):
@@ -17,30 +33,24 @@ class UserRegister(CamelModel):
 
     @field_validator("email")
     @classmethod
-    def check_usv_email(cls, email: str) -> str:
-        email = email.lower()
-        if email.rsplit("@", 1)[1] not in ALLOWED_DOMAINS:
-            raise ValueError("Se accepta doar adrese @student.usv.ro sau @usm.ro")
-        return email
-
-
-class UserLogin(CamelModel):
-    email: EmailStr
-    password: str
+    def lowercase(cls, email: str) -> str:
+        # domeniul se verifica in ruta, ca sa putem raspunde cu 400 cum cere Swagger-ul
+        return email.lower()
 
 
 class UserRead(CamelModel):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     email: str
     first_name: str
     last_name: str
-    role: UserRole
+    role: ApiRole
+    no_show_count: int
+    blocked: bool
     blocked_until: datetime | None
-    created_at: datetime
+    reservations_this_month: int
 
 
-class Token(CamelModel):
+class Token(BaseModel):
+    # snake_case cum cere OAuth2 (si butonul Authorize din Swagger UI)
     access_token: str
     token_type: str = "bearer"
