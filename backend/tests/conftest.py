@@ -1,4 +1,6 @@
 from collections.abc import Callable, Generator
+from datetime import UTC, datetime, time, timedelta
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -6,10 +8,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.core.clock import LOCAL_TZ
 from app.core.security import create_access_token, hash_password
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
+from app.models.resource import Resource, ResourceSchedule, SportType
 from app.models.user import User, UserRole
 
 
@@ -60,3 +64,25 @@ def make_user(db: Session) -> Callable[..., tuple[User, dict[str, str]]]:
         return user, {"Authorization": f"Bearer {create_access_token(user.id)}"}
 
     return make
+
+
+@pytest.fixture
+def court(db: Session) -> Resource:
+    """Teren de tenis deschis zilnic 08:00 - 22:00 (ora Romaniei), 40 lei pe ora."""
+    resource = Resource(
+        name="Teren tenis 1", sport_type=SportType(label="tenis"), price_per_hour=Decimal("40")
+    )
+    resource.schedules = [
+        ResourceSchedule(day_of_week=day, open_time=time(8), close_time=time(22))
+        for day in range(7)
+    ]
+    db.add(resource)
+    db.commit()
+    return resource
+
+
+def local_slot(days_ahead: int, hour: int, hours: int = 1) -> tuple[datetime, datetime]:
+    """Un interval la ora data (ora Romaniei), peste un numar de zile, in UTC."""
+    day = (datetime.now(LOCAL_TZ) + timedelta(days=days_ahead)).date()
+    start = datetime.combine(day, time(hour), tzinfo=LOCAL_TZ).astimezone(UTC)
+    return start, start + timedelta(hours=hours)
