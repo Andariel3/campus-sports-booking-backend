@@ -100,3 +100,20 @@ def set_payment(reservation_id: ReservationId, data: PaymentUpdate, _: AdminUser
     except ReservationError as exc:
         raise HTTPException(exc.status_code, exc.message) from None
     return reservation_view(reservation)
+
+
+@router.post(
+    "/{reservationId}/no-show",
+    response_model=ReservationRead,
+    summary="Marcare neprezentare (admin)",
+    description=(
+        "Rezervarea trece in NEPREZENTARE. La a doua neprezentare din luna contul "
+        "utilizatorului se blocheaza pana la inceputul lunii urmatoare."
+    ),
+)
+def mark_no_show(reservation_id: ReservationId, _: AdminUser, db: DbSession):
+    try:
+        reservation = reservation_service.mark_no_show(db, reservation_id)
+    except ReservationError as exc:
+        raise HTTPException(exc.status_code, exc.message) from None
+    return reservation_view(reservation)
