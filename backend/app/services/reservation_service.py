@@ -1,17 +1,17 @@
 """Rezervarile si regulile din regulamentul USV."""
 
-from datetime import timedelta
+from datetime import date, time, timedelta
 from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.clock import LOCAL_TZ, month_bounds, now
+from app.core.clock import LOCAL_TZ, as_utc, local_datetime, month_bounds, now
 from app.models.reservation import Reservation, ReservationStatus
 from app.models.resource import Resource
 from app.models.user import User, UserRole
-from app.schemas.reservation import ReservationCreate, to_utc
+from app.schemas.reservation import ApiStatus, ReservationCreate, to_utc
 from app.services import availability_service, user_service
 
 MAX_DAYS_AHEAD = 14
@@ -118,3 +118,75 @@ def _check_user_can_book(db: Session, user: User, start) -> None:
     )
     if count >= MAX_PER_MONTH_FOR_STUDENTS:
         raise NotAllowed(f"Ai atins limita de {MAX_PER_MONTH_FOR_STUDENTS} rezervari pe luna")
+
+
+CANCEL_DEADLINE = timedelta(hours=2)
+
+
+def list_reservations(
+    db: Session,
+    user: User,
+    status: ApiStatus | None = None,
+    resource_id: int | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+) -> list[Reservation]:
+    """Utilizatorul vede doar rezervarile lui, adminul pe toate. Cele mai noi primele."""
+    query = select(Reservation).order_by(Reservation.start_time.desc())
+    if user.role != UserRole.ADMINISTRATOR:
+        query = query.where(Reservation.user_id == user.id)
+    if resource_id is not None:
+        query = query.where(Reservation.resource_id == resource_id)
+    if date_from is not None:
+        query = query.where(Reservation.start_time >= local_datetime(date_from, time()))
+    if date_to is not None:
+        # "to" e inclusiv: pana la sfarsitul zilei
+        next_day = date_to + timedelta(days=1)
+        query = query.where(Reservation.start_time < local_datetime(next_day, time()))
+    if status is not None:
+        query = query.where(_status_condition(status))
+    return list(db.scalars(query))
+
+
+def get_reservation(db: Session, user: User, reservation_id: int) -> Reservation:
+    reservation = db.get(Reservation, reservation_id)
+    # rezervarile altora apar ca inexistente, ca sa nu se poata ghici id-uri
+    if reservation is None or (
+        user.role != UserRole.ADMINISTRATOR and reservation.user_id != user.id
+    ):
+        raise NotFound(f"Rezervarea {reservation_id} nu exista")
+    return reservation
+
+
+def cancel_reservation(db: Session, user: User, reservation_id: int) -> Reservation:
+    """Rezervarea nu se sterge, trece in Cancelled (ANULATA in API)."""
+    reservation = db.get(Reservation, reservation_id)
+    if reservation is None:
+        raise NotFound(f"Rezervarea {reservation_id} nu exista")
+    is_admin = user.role == UserRole.ADMINISTRATOR
+    if not is_admin and reservation.user_id != user.id:
+        raise NotAllowed("Rezervarea nu este a ta")
+    if reservation.status == ReservationStatus.CANCELLED:
+        raise InvalidInterval("Rezervarea este deja anulata")
+    if reservation.status == ReservationStatus.NO_SHOW:
+        raise InvalidInterval("Rezervarea a fost marcata ca neprezentare")
+    if not is_admin and as_utc(reservation.start_time) - now() < CANCEL_DEADLINE:
+        raise NotAllowed("Anularea se poate face cu minim 2 ore inainte")
+
+    reservation.status = ReservationStatus.CANCELLED
+    reservation.cancelled_at = now()
+    reservation.cancelled_by_id = user.id
+    db.commit()
+    db.refresh(reservation)
+    return reservation
+
+
+def _status_condition(status: ApiStatus):
+    if status == ApiStatus.ANULATA:
+        return Reservation.status == ReservationStatus.CANCELLED
+    if status == ApiStatus.NEPREZENTARE:
+        return Reservation.status == ReservationStatus.NO_SHOW
+    confirmed = Reservation.status == ReservationStatus.CONFIRMED
+    if status == ApiStatus.FINALIZATA:
+        return confirmed & (Reservation.end_time <= now())
+    return confirmed & (Reservation.end_time > now())
