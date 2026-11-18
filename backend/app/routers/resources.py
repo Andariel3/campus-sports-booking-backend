@@ -55,17 +55,18 @@ def update_resource(resource_id: ResourceId, data: ResourceUpdate, db: DbSession
     except DuplicateResourceNameError:
         raise _duplicate_name() from None
     except ValueError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
 
 
 @router.delete(
     "/{resourceId}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Stergere resursa (admin)",
+    description="Resursa devine inactiva si nu mai apare in lista; istoricul rezervarilor ramane.",
 )
 def delete_resource(resource_id: ResourceId, db: DbSession) -> None:
     try:
-        resource_service.delete_resource(db, resource_id)
+        resource_service.deactivate_resource(db, resource_id)
     except ResourceNotFoundError:
         raise _not_found(resource_id) from None
 
