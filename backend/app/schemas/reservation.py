@@ -48,6 +48,10 @@ class ReservationCreate(CamelModel):
     end: datetime
 
 
+class PaymentUpdate(CamelModel):
+    payment_status: PaymentStatus
+
+
 class ReservationRead(CamelModel):
     id: int
     user_id: int
@@ -57,6 +61,7 @@ class ReservationRead(CamelModel):
     status: ApiStatus
     payment_status: PaymentStatus
     amount: float
+    paid_at: datetime | None
     created_at: datetime | None
 
 
@@ -72,5 +77,6 @@ def reservation_view(reservation: Reservation) -> dict:
         if reservation.is_paid
         else PaymentStatus.NEACHITATA,
         "amount": float(reservation.amount),
+        "paid_at": as_utc(reservation.paid_at) if reservation.paid_at else None,
         "created_at": as_utc(reservation.created_at) if reservation.created_at else None,
     }
