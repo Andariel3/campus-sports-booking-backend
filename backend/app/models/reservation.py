@@ -15,9 +15,10 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import ExcludeConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.models.resource import Resource
 
 
 class ReservationStatus(StrEnum):
@@ -67,3 +68,5 @@ class Reservation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancelled_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+
+    resource: Mapped[Resource] = relationship(lazy="joined")
