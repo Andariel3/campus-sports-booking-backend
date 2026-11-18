@@ -4,10 +4,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
-from app.core.deps import CurrentUser
+from app.core.deps import AdminUser, CurrentUser
 from app.db.session import get_db
 from app.schemas.reservation import (
     ApiStatus,
+    PaymentUpdate,
     ReservationCreate,
     ReservationRead,
     reservation_view,
@@ -81,6 +82,21 @@ def get_reservation(reservation_id: ReservationId, user: CurrentUser, db: DbSess
 def cancel_reservation(reservation_id: ReservationId, user: CurrentUser, db: DbSession):
     try:
         reservation = reservation_service.cancel_reservation(db, user, reservation_id)
+    except ReservationError as exc:
+        raise HTTPException(exc.status_code, exc.message) from None
+    return reservation_view(reservation)
+
+
+@router.patch(
+    "/{reservationId}/payment",
+    response_model=ReservationRead,
+    tags=["payments"],
+    summary="Marcare plata (admin)",
+    description="Adminul marcheaza rezervarea ca ACHITATA sau NEACHITATA.",
+)
+def set_payment(reservation_id: ReservationId, data: PaymentUpdate, _: AdminUser, db: DbSession):
+    try:
+        reservation = reservation_service.set_payment(db, reservation_id, data.payment_status)
     except ReservationError as exc:
         raise HTTPException(exc.status_code, exc.message) from None
     return reservation_view(reservation)
