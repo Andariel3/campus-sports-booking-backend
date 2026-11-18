@@ -1,8 +1,10 @@
 from datetime import time
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.models.resource import Resource, SportType
+from app.models.user import UserRole
 
 URL = "/api/v1/resources"
 
@@ -15,6 +17,13 @@ TENNIS_COURT = {
     "openHour": "08:00",
     "closeHour": "22:00",
 }
+
+
+@pytest.fixture(autouse=True)
+def as_admin(client: TestClient, make_user) -> None:
+    """Adaugarea si modificarea resurselor sunt doar pentru admin."""
+    _, headers = make_user(UserRole.ADMINISTRATOR)
+    client.headers.update(headers)
 
 
 def create(client: TestClient, **overrides) -> dict:
