@@ -11,7 +11,7 @@ from app.core.clock import LOCAL_TZ, as_utc, local_datetime, month_bounds, now
 from app.models.reservation import Reservation, ReservationStatus
 from app.models.resource import Resource
 from app.models.user import User, UserRole
-from app.schemas.reservation import ApiStatus, ReservationCreate, to_utc
+from app.schemas.reservation import ApiStatus, PaymentStatus, ReservationCreate, to_utc
 from app.services import availability_service, user_service
 
 MAX_DAYS_AHEAD = 14
@@ -178,6 +178,22 @@ def cancel_reservation(db: Session, user: User, reservation_id: int) -> Reservat
     reservation.cancelled_by_id = user.id
     db.commit()
     db.refresh(reservation)
+    return reservation
+
+
+def set_payment(db: Session, reservation_id: int, payment: PaymentStatus) -> Reservation:
+    """Adminul marcheaza rezervarea ca ACHITATA sau NEACHITATA (implicit e NEACHITATA)."""
+    reservation = db.get(Reservation, reservation_id)
+    if reservation is None:
+        raise NotFound(f"Rezervarea {reservation_id} nu exista")
+    if reservation.status == ReservationStatus.CANCELLED:
+        raise InvalidInterval("Rezervarea este anulata")
+    paid = payment == PaymentStatus.ACHITATA
+    if paid != reservation.is_paid:
+        reservation.is_paid = paid
+        reservation.paid_at = now() if paid else None
+        db.commit()
+        db.refresh(reservation)
     return reservation
 
 
