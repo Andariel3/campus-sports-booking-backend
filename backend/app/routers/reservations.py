@@ -1,17 +1,44 @@
+from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.deps import CurrentUser
 from app.db.session import get_db
-from app.schemas.reservation import ReservationCreate, ReservationRead, reservation_view
+from app.schemas.reservation import (
+    ApiStatus,
+    ReservationCreate,
+    ReservationRead,
+    reservation_view,
+)
 from app.services import reservation_service
 from app.services.reservation_service import ReservationError
 
 router = APIRouter(prefix="/reservations", tags=["reservations"])
 
 DbSession = Annotated[Session, Depends(get_db)]
+ReservationId = Annotated[int, Path(alias="reservationId")]
+
+
+@router.get(
+    "",
+    response_model=list[ReservationRead],
+    summary="Lista rezervarilor",
+    description="Studentii si profesorii vad doar rezervarile proprii. Adminul le vede pe toate.",
+)
+def list_reservations(
+    user: CurrentUser,
+    db: DbSession,
+    status_filter: Annotated[ApiStatus | None, Query(alias="status")] = None,
+    resource_id: Annotated[int | None, Query(alias="resourceId")] = None,
+    date_from: Annotated[date | None, Query(alias="from")] = None,
+    date_to: Annotated[date | None, Query(alias="to")] = None,
+):
+    reservations = reservation_service.list_reservations(
+        db, user, status_filter, resource_id, date_from, date_to
+    )
+    return [reservation_view(r) for r in reservations]
 
 
 @router.post(
@@ -28,6 +55,32 @@ DbSession = Annotated[Session, Depends(get_db)]
 def create_reservation(data: ReservationCreate, user: CurrentUser, db: DbSession):
     try:
         reservation = reservation_service.create_reservation(db, user, data)
+    except ReservationError as exc:
+        raise HTTPException(exc.status_code, exc.message) from None
+    return reservation_view(reservation)
+
+
+@router.get("/{reservationId}", response_model=ReservationRead, summary="Detalii rezervare")
+def get_reservation(reservation_id: ReservationId, user: CurrentUser, db: DbSession):
+    try:
+        reservation = reservation_service.get_reservation(db, user, reservation_id)
+    except ReservationError as exc:
+        raise HTTPException(exc.status_code, exc.message) from None
+    return reservation_view(reservation)
+
+
+@router.delete(
+    "/{reservationId}",
+    response_model=ReservationRead,
+    summary="Anulare rezervare",
+    description=(
+        "Rezervarea nu se sterge, ci trece in statusul ANULATA. Utilizatorul poate anula "
+        "cu minim 2 ore inainte. Adminul poate anula oricand."
+    ),
+)
+def cancel_reservation(reservation_id: ReservationId, user: CurrentUser, db: DbSession):
+    try:
+        reservation = reservation_service.cancel_reservation(db, user, reservation_id)
     except ReservationError as exc:
         raise HTTPException(exc.status_code, exc.message) from None
     return reservation_view(reservation)
