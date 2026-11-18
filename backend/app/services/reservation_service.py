@@ -197,6 +197,24 @@ def set_payment(db: Session, reservation_id: int, payment: PaymentStatus) -> Res
     return reservation
 
 
+def mark_no_show(db: Session, reservation_id: int) -> Reservation:
+    """Butonul de "Neprezentare" al adminului (PRD). La a doua din luna contul se blocheaza."""
+    reservation = db.get(Reservation, reservation_id)
+    if reservation is None:
+        raise NotFound(f"Rezervarea {reservation_id} nu exista")
+    if reservation.status != ReservationStatus.CONFIRMED:
+        raise InvalidInterval("Doar o rezervare activa poate fi marcata ca neprezentare")
+    if as_utc(reservation.start_time) > now():
+        raise InvalidInterval("Rezervarea nu a inceput inca")
+
+    reservation.status = ReservationStatus.NO_SHOW
+    db.flush()
+    user_service.block_after_no_shows(db, db.get(User, reservation.user_id))
+    db.commit()
+    db.refresh(reservation)
+    return reservation
+
+
 def _status_condition(status: ApiStatus):
     if status == ApiStatus.ANULATA:
         return Reservation.status == ReservationStatus.CANCELLED
